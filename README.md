@@ -1,3 +1,5 @@
+Work in progress - feedback and contributions welcome!
+
 # PostgREST sessions example
 
 ## What is this?

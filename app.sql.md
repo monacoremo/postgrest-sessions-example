@@ -370,10 +370,10 @@ alter table app.sessions enable row level security;
 
 ```
 
-As of now, no user will be able to access any row in the `state` schema, with
+As of now, no user will be able to access any row in the `app` schema, with
 the exception of the superuser. We will grant granular access to individual
 roles using `policies`. As the superuser usually overrides Row Level Security,
-we will need to make sure that no functions or views that access the `state`
+we will need to make sure that no functions or views that access the `app`
 schema are owned by the superuser.
 
 
@@ -766,7 +766,6 @@ We will configure PostgREST to run this function before every request in
 The `api.login` endpoint wraps the `app.login` function to add the following:
 * Raise an exception if the given login credentials are not valid.
 * Add a header to the response to set a cookie with the session token.
-* Return information on the logged in user.
 
 ```sql
 create function api.login(email text, password text)
@@ -794,7 +793,7 @@ create function api.login(email text, password text)
     $$;
 
 comment on function api.login is
-    'Creates a new session and returns user data given valid credentials.';
+    'Creates a new session given valid credentials.';
 
 grant execute on function api.login to anonymous;
 
