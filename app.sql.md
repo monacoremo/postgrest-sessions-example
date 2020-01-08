@@ -13,7 +13,7 @@ This example features:
 * Sessions and authentication based on cookies without JWTs
 
 This document aims to explain all steps in setting up the application. If you
-are are familiar with PostgREST, you can jump directly to the key components
+are familiar with PostgREST, you can jump directly to the key components
 of session based authentication:
 
 * Definition of the [`app.sessions` table](#sessions) and `app.active_sessions`
