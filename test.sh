@@ -6,7 +6,7 @@
 
 set -e
 
-export EXAMPLEAPP_URI=${EXAMPLE_APP_URI:-"http://localhost:3000/"}
+export EXAMPLEAPP_URI=${EXAMPLEAPP_URI:-"http://localhost:3000/"}
 
 echo "Waiting for API to become available... (Ctrl-c to cancel)"
 
