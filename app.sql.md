@@ -284,7 +284,7 @@ create trigger cryptpassword
 ```
 
 `app.cryptpassword` is a special kind of function that returns a trigger. We
-use the PostgreSQL procedural language `pgplsql` to define it. We would prefer
+use the PostgreSQL procedural language `plpgsql` to define it. We would prefer
 to use plain SQL where possible to define functions, but using the procedural
 language is necessary in this case. Trigger functions recieve several implicit
 arguments, including:
