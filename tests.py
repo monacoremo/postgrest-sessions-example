@@ -98,7 +98,7 @@ def test_login_wrong_email(alice_account, alice_email):
         'password': 'alicesecret',
     })
 
-    assert resp.status_code == 400
+    assert resp.status_code == 401
 
 
 def test_login_wrong_password(alice_account, alice_email):
@@ -108,7 +108,7 @@ def test_login_wrong_password(alice_account, alice_email):
         'password': 'wrong_alicesecret',
     })
 
-    assert resp.status_code == 400
+    assert resp.status_code == 401
 
 
 def test_current_user(alice_session):
