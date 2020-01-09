@@ -54,7 +54,7 @@ begin;
 
 If anything goes wrong in the following statements, all changes will be rolled
 back, including definitions of new tables, newly set up roles etc. This is
-a valuable feature of PostgREST not available in most other relational
+a valuable feature of PostgreSQL not available in most other relational
 databases.
 
 
@@ -775,7 +775,6 @@ create function api.login(email text, password text)
     as $$
         declare
             session_token text;
-            cookies text;
         begin
             select app.login(email, password) into session_token;
             if session_token is null then
