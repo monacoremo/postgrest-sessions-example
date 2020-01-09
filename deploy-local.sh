@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # This script sets up a PostgreSQL database in a temporary directory, loads the
 # schema described in the app.sql.md file and runs a PostgREST instance on top
@@ -27,7 +27,7 @@ trap cleanup exit
 # Filter the SQL code blocks from the Markdown file
 sed -f md2sql.sed <app.sql.md >"$EXAMPLEAPP_BASEDIR/app.sql"
 
-# Initialize our database in the PGDATA directory. As we'd like our environment
+# Initialize our database cluster in the PGDATA directory. As we'd like our environment
 # to be as reproducible as possible, we make it independent from the locale,
 # encoding and timezone of the host.
 TZ=UTC initdb --no-locale --encoding=UTF8 -U "$PGUSER" > /dev/null
@@ -35,7 +35,7 @@ TZ=UTC initdb --no-locale --encoding=UTF8 -U "$PGUSER" > /dev/null
 # Create the socket directory.
 mkdir -p "$PGHOST"
 
-# Start the database, listening on a socket instead of a port.
+# Start the database server, listening on a socket instead of a port.
 # -F disables file syncing for a bit of extra performance in testing,
 # don't use this in production. We use pg_ctl here as it waits for its
 # actions to complete by default.
@@ -44,13 +44,13 @@ pg_ctl start -o "-F -c listen_addresses=\"\" -k $PGHOST" > /dev/null
 # Load the application schema.
 psql -P pager=off -f "$EXAMPLEAPP_BASEDIR/app.sql"
 
-# Stop the database and wait for it to shut down.
+# Stop the database server and wait for it to shut down.
 pg_ctl stop > /dev/null
 
 echo "Running PostgreSQL and PostgREST on http://localhost:$EXAMPLEAPP_PORT/"
 echo "Press Ctrl-c to exit and clean up the temp directory $EXAMPLEAPP_BASEDIR."
 
-# Start a non-daemonized instance of the database.
+# Start a non-daemonized instance of the database server.
 postgres -F -c listen_addresses="" -k "$PGHOST" &
 
 postgrest postgrest.conf &
