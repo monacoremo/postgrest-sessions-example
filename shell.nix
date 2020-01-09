@@ -58,5 +58,6 @@ pkgs.stdenv.mkDerivation {
     postgrest
     python
     pkgs.entr
+    pkgs.curl
   ];
 }

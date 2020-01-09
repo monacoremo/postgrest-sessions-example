@@ -8,17 +8,18 @@ to run the `psql` script defined in this document and access the application's
 REST API.
 
 This example features:
+
 * Separation of the application and its API
 * Use of permissions and Row Level Security
-* Sessions and authentication based on cookies without JWTs
+* Sessions and authentication based on cookies, without JWTs
 
 This document aims to explain all steps in setting up the application. If you
 are familiar with PostgREST, you can jump directly to the key components of
 session based authentication:
 
-* Definition of the [`app.sessions` table](#sessions) and `app.active_sessions`
-  view.
-* Auth functions defined in the [`app` schema](#login).
+* Definition of the [`auth.sessions` table](#sessions) and
+  `auth.active_sessions` view.
+* Auth functions defined in the [`auth` schema](#login).
 * The [`authenticate` function](#authentication-hook) that should be
   set up as the `pre-request` hook in PostgREST.
 * Auth API endpoints in the [`apí` schema](#login-api-endpoint).
@@ -62,11 +63,17 @@ databases.
 
 In this application, we are going to use the `pgcrypto` extension to salt and
 hash passwords and to gernerate random session tokens. `citext` will provide us
-with a case-insensitive text type which we will use for emails.
+with a case-insensitive text type which we will use for emails. `pgTAP` allows
+us to define and run tests within the database. While the first two extensions
+come with PostgreSQL by default, you will need to install the `pgTAP` one
+separately.
 
 ```sql
+\echo 'Creating extensions...'
+
 create extension pgcrypto;
 create extension citext;
+create extension pgtap;
 
 ```
 
@@ -74,7 +81,7 @@ create extension citext;
 ## Roles
 
 Roles in PostgreSQL apply to the database cluster (i.e. the set of databases
-managed by one PostreSQL instance) as a whole. Setting up the roles for our
+managed by one PostreSQL server) as a whole. Setting up the roles for our
 application is the only part that might encounter conflicts when run on a fresh
 database. We are going to set up all the required roles here.
 
@@ -104,6 +111,11 @@ comment on role webuser is
 
 ```
 
+As we won't use the JWT authentication feature, PostgREST it will always switch
+to the `anonymous` role first. We will then switch roles again if the user
+is authenticated based on the session logic defined in
+[`auth.authenticate`](#authentication-hook).
+
 The comments will be useful to users working with our schema, both in GUI
 applications and with `psql` meta commands, e.g. `\d...`.
 
@@ -121,12 +133,18 @@ interactively, which will make sure that the password does not appear In any
 logs or history files.
 
 
-### API role
+### Auth and API roles
 
-The `api` role will own the api schema and the the views and functions living in
-it.
+The `auth` and `api` roles will own their respective schemas including the
+tables, views and functions defined in them.
+
 
 ```sql
+create role auth nologin;
+
+comment on role auth is
+    'Role that owns the auth schema and its objects.';
+
 create role api nologin;
 
 comment on role api is
@@ -153,20 +171,20 @@ Now, for all functions created in this database by the superuser, permissions
 to execute functions have to be explicitly granted using `grant execute on
 function ...` statements.
 
-We also need to remove the default execute privileges from the `api` role, as the
-defaults apply per user.
+We also need to remove the default execute privileges from the `auth` and `api`
+roles, as the defaults apply per user.
 
 ```sql
-alter default privileges for role api revoke execute on functions from public;
+alter default privileges for role auth, api revoke execute on functions from public;
 
 ```
 
 
-## App
+## App schema
 
 The `app` schema will contain the current state and business logic of the
-application. We will define our API in a separate `api` schema later and
-isolate all PostgREST specific parts there.
+application. We will define the authentication functionalities and our API in
+separate schemas later and isolate all PostgREST specific parts there.
 
 ```sql
 \echo 'Creating the app schema...'
@@ -185,6 +203,8 @@ separate role with lower privileges.
 
 ### Users
 
+#### `users` table
+
 The `users` table tracks the users of our application.
 
 ```sql
@@ -202,6 +222,8 @@ comment on table app.users is
 
 ```
 
+#### Email validation
+
 The unique constraint on email will make sure, that an email address can only
 be used by one user at a time. PostgreSQL will create an index in order to
 enforce this contraint, which will also make our login queries faster. The
@@ -210,8 +232,33 @@ don't want to allow the same email address to be used more than one time by
 capitalizing it differently.
 
 To validate the email, it would be best to create a [custom
-domain](https://dba.stackexchange.com/a/165923).  But we skip this for this
-example.
+domain](https://dba.stackexchange.com/a/165923):
+
+    create extension plperl;
+    create language plperlu;
+
+    create function validate_email(email citext)
+        returns boolean
+        language plperlu
+        immutable
+        leakproof
+        strict
+        as $$
+             use Email::Valid;
+             my $email = shift;
+             Email::Valid->address($email) or die "Invalid email address: $email\n";
+             return 'true';
+        $$;
+
+    create domain valid_email as citext not null
+        contraint valid_email_check check (validate_email(value))
+
+We could then use `valid_email` as the column type. We will skip this for this
+example, as it would require another extension that might not be availale by
+default.
+
+
+#### Hashing passwords
 
 We need to salt and hash all passwords, which we will ensure using a trigger.
 
@@ -258,6 +305,17 @@ that can be used before `begin` to declare variables, as we will see later.
 The trigger we defined here will fire on any change of the `password` field and
 make sure that only salted and hashed passwords are saved in the database.
 
+
+#### Permissions on the `users` table
+
+The `auth` role will need to be able to reference the users and to select
+certain fields in order to validate credentials:
+
+```sql
+grant references, select(user_id, email, password) on table app.users to auth;
+
+```
+
 We will grant selective permissions to our API:
 
 ```sql
@@ -278,10 +336,10 @@ grant all on app.users_user_id_seq to api;
 
 ```
 
-We could also grant those permissions in a separate section in order
-to ceompletely decouple the API from this schema,
-but it seems more practicable to keep the permission grants
-close to the definition of each object.
+> We could also grant those permissions in a separate section in order
+> to completely decouple the API from this schema,
+> but it seems more practicable to keep the permission grants
+> close to the definition of each object.
 
 
 ### Todos
@@ -336,279 +394,29 @@ grant all on app.todos_todo_id_seq to webuser;
 
 ```
 
-This seems to work without actually granting the role
-`usage` on this schema.
+This seems to work without actually granting the role `usage` on this schema.
 
-> Note on permissions:
+> #### Note: Granting permissions
 >
-> A pragmatic way to figure out the required permission grants is to start with
-> a locked down setup (as we will do here with separated schemas and roles, Row
-> Level Security and revoked default permissions), write tests for your
-> application (be it unit tests in the database, see below, or integration
-> tests) and running them and adding permissions step by step until everything
-> works.
-
-
-### Sessions
-
-We will use a table to track user sessions:
-
-```sql
-create table app.sessions
-    ( token      text not null primary key
-                 default encode(gen_random_bytes(32), 'base64')
-    , user_id    integer not null references app.users
-    , created    timestamptz not null default clock_timestamp()
-    , expires    timestamptz not null
-                 default clock_timestamp() + '15min'::interval
-
-    , check (expires > created)
-    );
-
-comment on table app.sessions is
-    'User session, both active and expired ones.';
-
-comment on column app.sessions.expires is
-    'Time on which the session expires.';
-
-```
-
-The `token` column will be generated automatically based on 32 random bytes
-from the `pgcrypto` module, while will then be base64 encoded. We could also
-store the raw bytes in a `bytea` column, saving a bit of space, and handle the
-encoding and decoding in the API, but this is much simpler and good enough for
-now.
-
-`expires` will be set to the time 15 minutes into the future by default. You
-can change this default with `alter column app.sessions.expires set default to
-clock_timestamp() + '...'::interval;`.  The function `clock_timestamp()` will
-always return the current time, independent from when the current transaction
-started.
-
-We use a check contraint here to have the database maintain some invariants on
-our data, like that a session should not expire before it was created. With
-good contraints, we can prevent whole classes of bugs in our application.
-
-In most places in our application, only the sessions that are currently active
-will be of interest.  We will create a view that identifies them reliably and
-that we will be able to build upon later.
-
-```sql
-create view app.active_sessions as
-    select
-            token,
-            user_id,
-            created,
-            expires
-        from app.sessions
-        where expires > clock_timestamp()
-    with local check option;
-
-comment on view app.active_sessions is
-    'View of the currently active sessions';
-
-```
-
-The `with local check option` statement enables checks on changes that operate
-on this view, making sure that only valid sessions are inserted or updated.
-
-Filtering on the `expires` column as we do in the view would currently require
-a scan of the whole table on each query. We can make this more efficient with
-an index.
-
-```sql
-create index on app.sessions (expires);
-
-```
-
-To clean up expired sessions, we can periodically run the following function:
-
-```sql
-create function app.clean_sessions()
-    returns void
-    language sql
-    security definer
-    as $$
-        delete from app.sessions
-            where expires < clock_timestamp() - '1day'::interval;
-    $$;
-
-```
-
-To run this function regularly, we could create a separate role with limited
-privileges, granting it just `usage` on the `app` schema and `execute` on this function,
-that cron job will be able to login as.
-
-
-### Login
-
-We define a login function that creates a new session, using many of the defaults
-that we set in the `sessions` table.
-
-```sql
-create function app.login(email text, password text)
-    returns text
-    language sql
-    security definer
-    as $$
-        insert into app.active_sessions(user_id)
-            select user_id
-            from app.users
-            where
-                email = login.email
-                and password = crypt(login.password, password)
-            returning token;
-    $$;
-
-comment on function app.login is
-    'Returns the token for a newly created session or null on failure.';
-
-```
-
-There is a lot happening here, so we'll go through it step by step.
-
-The login function takes two parameters of type `text`, email and password,
-and returns a scalar value of type `text`.
-
-`language sql` means that the function body will be a regular SQL query. We try
-to use SQL queries where possible, as they can be optimized the most by
-the query planner of PostgreSQL. If we are not able to express a function in
-regular SQL, we'll use the more complex and flexible `plpgsql` procedural
-language.
-
-`security definer` means that the function will run the permissions of the
-owner of the function (i.e. `auth` is this case), and not the permissions of
-the caller. This can create security risks if misused, but also gives us the
-opportunity to isolate and manage privileged actions used properly.
-
-`$$` is an alternative syntax for starting and ending strings, with the
-advantage that almost nothing needs to be escaped within this kind of string.
-
-The function body will create a new session if it finds a user_id that matches
-the given credentials. It creates a new session token and expiry time based
-on the defaults that we in the table and returns the new session token.
-
-Inserting into the `app.active_sessions` view is possible, as it is simple
-enough for PostgreSQL to transparently translate it into an insert into
-`app.sessions` (see: updatable views).
-
-The arguments given to the function can be accessed by the names given in the
-function definition. In order to disambiguate them from the columns of the
-`app.active_sessions` view, we can prefix them with the name of the function,
-`login` in this case (without the schema).
-
-The returned token is generated automatically based on the default value
-defined for the `token` column in the `app.sessions` table. If no new session
-has been created, i.e. because the credentials weren't valid, then `null` will
-be returned by the function.
-
-Our API needs to be able to use this function:
-
-```sql
-grant execute on function app.login to api;
-
-```
-
-
-### Refresh session
-
-To refresh session, we update the expiry time in the respective record:
-
-```sql
-create function app.refresh_session(session_token text)
-    returns void
-    language sql
-    security definer
-    as $$
-        update app.sessions
-            set expires = default
-            where token = session_token and expires > clock_timestamp()
-    $$;
-
-comment on function app.refresh_session is
-    'Extend the expiration time of the given session.';
-
-```
-
-We cannot use the `app.active_sessions` view here, as the column default on
-expires from the table `app.sessions` is not available in the view.
-
-```sql
-grant execute on function app.refresh_session to api;
-
-```
-
-
-### Logout
-
-We expire sessions by setting their expiry time to the current time:
-
-```sql
-create function app.logout(token text)
-    returns void
-    language sql
-    security definer
-    as $$
-        update app.sessions
-            set expires = clock_timestamp()
-            where token = logout.token
-    $$;
-
-comment on function app.logout is
-    'Expire the given session.';
-
-grant execute on function app.logout to api;
-
-```
-
-
-### Session User-ID
-
-In our authentication hook `api.authenticate`, we will need to get the
-`user_id` of the currently authenticated user given a session token. We will
-expose this privileged functionality through a `security definer` function that
-will run with the permissions of the superuser.
-
-```sql
-create function app.session_user_id(session_token text)
-    returns integer
-    language sql
-    security definer
-    as $$
-        select user_id
-            from app.active_sessions
-            where token = session_token;
-    $$;
-
-comment on function app.session_user_id is
-    'Returns the id of the user currently authenticated, given a session token';
-
-```
-
-The anonymous role will need to access this function in order to authenticate
-itself:
-
-```sql
-grant execute on function app.session_user_id to anonymous;
-
-```
-
-The query in this function will be efficient based on the primary key
-index on the `token` column.
-
-
-### Row Level Security and Policies
+> A pragmatic way to figure out which permissions need to be granted is to
+> start with a locked down setup (as we will do here with separated schemas and
+> roles, Row Level Security and revoked default permissions), write tests for
+> your application (be it unit tests in the database, see below, or integration
+> tests) and running them while adding permissions step by step until
+> everything works. You don't need to come up with those queries from nothing!
+
+
+### Row Level Security and policies
 
 #### Enable Row Level Security
 
-We want to make sure that users, todos and sessions can only be accessed by who
+We want to make sure that `users` and `todos` can only be accessed by who
 is supposed to have access to them. As a first step, we are going to lock the
 tables in the `app` schema down completely using Row Level Security:
 
 ```sql
 alter table app.users enable row level security;
 alter table app.todos enable row level security;
-alter table app.sessions enable row level security;
 
 ```
 
@@ -618,19 +426,23 @@ roles using `policies`. As the superuser usually overrides Row Level Security,
 we will need to make sure that no functions or views that access the `app`
 schema are owned by the superuser.
 
+PostgreSQL will make sure that our policies are consistently applied in all
+cases, e.g. when performing joins of embeds. This would be very challenging to
+implement reliably outside the database.
+
 
 #### Helper function: Current `user_id`
 
 Our Row Level Security policies will need to access the `user_id` of the
-currently authenticated user. See `api.authenticate` for the function that sets
-the value as a local setting.
+currently authenticated user. See [`auth.authenticate`](#authentication-hook)
+for the function that sets the value as a local setting.
 
 ```sql
 create function app.current_user_id()
     returns integer
     language sql
     as $$
-        select nullif(current_setting('app.user_id', true), '')::integer
+        select nullif(current_setting('auth.user_id', true), '')::integer
     $$;
 
 comment on function app.current_user_id is
@@ -646,7 +458,7 @@ grant execute on function app.current_user_id to api, webuser;
 ```
 
 
-#### Access to `app.users`
+#### Policies on `app.users`
 
 Webusers should be able to see all other users (we'll restrict the columns
 through the API views), but only edit their own record.
@@ -669,8 +481,20 @@ policy webuser_read_user to webuser for ...`. This would, however, not work for
 this use-case. We will define views in a separate API schema that will be owned
 by the `api` role. When a `webuser` uses those views, the policy checks would
 be run against the role of the view owner, `api`. `current_setting('role')`
-always refers to the current role that was set with `set local role ...`, so we
-use this instead.
+always refers to the current role that was set with `set local role ...;`
+previously, so we use that instead.
+
+The `auth` role will need to select users in order to validate their
+credentials:
+
+```sql
+create policy auth_read_user
+    on app.users
+    for select
+    to auth
+    using (true);
+
+```
 
 Our API should be able to register new users:
 
@@ -695,7 +519,10 @@ create policy webuser_read_todo
     for select
     using (
         current_setting('role') = 'webuser'
-        and (public or user_id = app.current_user_id())
+        and (
+            public
+            or user_id = app.current_user_id()
+        )
     );
 
 create policy webuser_write_todo
@@ -709,7 +536,7 @@ create policy webuser_write_todo
 ```
 
 
-### Permission of the `api` role on the `app` schema
+### Usage permissions on the `app` schema
 
 The views owned by the api schema will be executed with its permissions,
 regardless of who is using the views. Accordingly, we grant the api role
@@ -717,12 +544,367 @@ access to the data schema, but restrict access through the row level
 security policies.
 
 ```sql
-grant usage on schema app to anonymous, api;
+grant usage on schema app to auth, api;
 
 ```
 
 
-## API
+## Auth schema
+
+We create an `auth` schema that will be owned by the `auth` role:
+
+```sql
+\echo 'Creating the auth schema...'
+
+create schema authorization auth;
+
+comment on schema auth is
+    'Schema that handles sessions and authorization.';
+
+```
+
+
+### Switch to the `auth` role
+
+All following tables and functions should be owned by the `auth` role. The
+easiest way to achieve this is to switch to it for now:
+
+```sql
+set role auth;
+
+```
+
+We will be able to return to the superuser role later with `reset role;`.
+
+
+### Sessions
+
+We will use a table to track user sessions:
+
+```sql
+create table auth.sessions
+    ( token      text not null primary key
+                 default encode(gen_random_bytes(32), 'base64')
+    , user_id    integer not null references app.users
+    , created    timestamptz not null default clock_timestamp()
+    , expires    timestamptz not null
+                 default clock_timestamp() + '15min'::interval
+
+    , check (expires > created)
+    );
+
+comment on table auth.sessions is
+    'User sessions, both active and expired ones.';
+
+comment on column auth.sessions.expires is
+    'Time on which the session expires.';
+
+```
+
+The `token` field will be generated automatically based on 32 random bytes
+(i.e. 256 bit, which should be plenty) from the `pgcrypto` module, which will
+then be base64 encoded. We could also store the raw bytes in a `bytea` column,
+saving a bit of space, and handle the encoding and decoding in the API. But
+the solution we chose here is much simpler and good enough for now.
+
+`expires` will be set to the time 15 minutes into the future by default. You
+can change this default with `alter column app.sessions.expires set default to
+clock_timestamp() + '...'::interval;`.  The function `clock_timestamp()` will
+always return the current time, independent from when the current transaction
+started (other than, for example, `now()`).
+
+We use a check contraint here to have the database maintain some invariants on
+our data, in this case that a session should not expire before it was created.
+With good contraints, we can prevent whole classes of bugs in our application.
+
+In most places in our application, only the sessions that are currently active
+will be of interest.  We will create a view that identifies them reliably and
+that we will be able to build upon later.
+
+```sql
+create view auth.active_sessions as
+    select
+            token,
+            user_id,
+            created,
+            expires
+        from auth.sessions
+        where expires > clock_timestamp()
+        with local check option;
+
+comment on view auth.active_sessions is
+    'View of the currently active sessions';
+
+```
+
+The `with local check option` statement enables checks on changes that operate
+on this view, making sure that only valid sessions can be inserted or updated.
+
+Filtering on the `expires` column, as we do in the view, would currently require
+a very inefficient scan of the whole table on each query. We can make this more
+efficient with an index.
+
+```sql
+create index on auth.sessions(expires);
+
+```
+
+To clean up expired sessions, we can periodically run the following function:
+
+```sql
+create function auth.clean_sessions()
+    returns void
+    language sql
+    security definer
+    as $$
+        delete from auth.sessions
+            where expires < clock_timestamp() - '1day'::interval;
+    $$;
+
+comment on function auth.clean_sessions is
+    'Cleans up sessions that have expired longer than a day ago.';
+
+```
+
+To run this function regularly, we could create a separate role with limited
+privileges, granting it just `usage` on the `auth` schema and `execute` on this
+function, that the cron job will be able to login as.
+
+
+### Login
+
+We define a login function that creates a new session, using many of the
+defaults that we set in the `sessions` table.
+
+```sql
+create function auth.login(email text, password text)
+    returns text
+    language sql
+    security definer
+    as $$
+        insert into auth.active_sessions(user_id)
+            select user_id
+            from app.users
+            where
+                email = login.email
+                and password = crypt(login.password, password)
+            returning token;
+    $$;
+
+comment on function auth.login is
+    'Returns the token for a newly created session or null on failure.';
+
+```
+
+There is a lot happening here, so let's go through it step by step:
+
+* The login function takes two parameters of type `text`, email and password,
+  and returns a scalar value of type `text`, which will be a newly generated
+  session token.
+* `language sql` means that the function body will be a regular SQL query. We
+  try to use SQL queries where possible, as they can be optimized the most by
+  the query planner of PostgreSQL. If we are not able to express a function in
+  regular SQL, we'll use the more complex and flexible `plpgsql` procedural
+  language.
+* `security definer` means that the function will run the permissions of the
+  owner of the function (i.e. `auth` is this case), and not the permissions of
+  the caller. This can create security risks if misused, but also gives us the
+  opportunity to isolate and manage privileged actions used properly.
+* `$$` is an alternative syntax for starting and ending strings, with the
+  advantage that almost nothing needs to be escaped within this kind of string.
+* The function body will create a new session if it finds a `user_id` that
+  matches the given credentials. It creates a new session token and expiration
+  time based on the defaults that we in the table and returns the new session
+  token.
+
+  Inserting into the `auth.active_sessions` view is possible, as it is simple
+  enough for PostgreSQL to transparently translate it into an insert into
+  `auth.sessions` (see:
+  [Updatable views](https://www.postgresql.org/docs/12/sql-createview.html#SQL-CREATEVIEW-UPDATABLE-VIEWS)).
+* The arguments given to the function can be accessed by the names given in the
+  function definition. In order to disambiguate them from the columns of the
+  `app.active_sessions` view, we can prefix them with the name of the function,
+  `login` in this case (without the schema).
+* The returned token is generated automatically based on the default value
+  defined for the `token` column in the `app.sessions` table. If no new session
+  has been created, i.e. because the credentials weren't valid, then `null` will
+  be returned by the function.
+
+Our API needs to be able to use this function:
+
+```sql
+grant execute on function auth.login to api;
+
+```
+
+
+### Refresh session
+
+To refresh session, we update the expiration time in the respective record:
+
+```sql
+create function auth.refresh_session(session_token text)
+    returns void
+    language sql
+    security definer
+    as $$
+        update auth.sessions
+            set expires = default
+            where token = session_token and expires > clock_timestamp()
+    $$;
+
+comment on function auth.refresh_session is
+    'Extend the expiration time of the given session.';
+
+```
+
+We cannot use the `auth.active_sessions` view here, as the column default on
+expires from the table `auth.sessions` is not available in the view.
+
+```sql
+grant execute on function auth.refresh_session to api;
+
+```
+
+
+### Logout
+
+We expire sessions by setting their expiration time to the current time:
+
+```sql
+create function auth.logout(token text)
+    returns void
+    language sql
+    security definer
+    as $$
+        update auth.sessions
+            set expires = clock_timestamp()
+            where token = logout.token
+    $$;
+
+comment on function auth.logout is
+    'Expire the given session.';
+
+grant execute on function auth.logout to api;
+
+```
+
+
+### Session User-ID
+
+In our authentication hook `auth.authenticate`, we will need to get the
+`user_id` of the currently authenticated user given a session token. We will
+expose this privileged functionality through a `security definer` function that
+will run with the permissions of the superuser.
+
+```sql
+create function auth.session_user_id(session_token text)
+    returns integer
+    language sql
+    security definer
+    as $$
+        select user_id
+            from auth.active_sessions
+            where token = session_token;
+    $$;
+
+comment on function auth.session_user_id is
+    'Returns the id of the user currently authenticated, given a session token';
+
+```
+
+The anonymous role will need to access this function in order to authenticate
+itself:
+
+```sql
+grant execute on function auth.session_user_id to anonymous;
+
+```
+
+The query in this function will be efficient based on the primary key
+index on the `token` column.
+
+
+### Authentication hook
+
+For each request, PostgREST will provide cookie values from the original HTTP
+request it received in the `request.cookie.*` variables. In the authentication
+hook that we define below, we will read the `session_token` cookie, if it
+exists. The function will switch roles and set the appropriate `user_id` if the
+session as identified by the token is valid.
+
+```sql
+create function auth.authenticate()
+    returns void
+    language plpgsql
+    as $$
+        declare
+            session_token text;
+            session_user_id int;
+        begin
+            select current_setting('request.cookie.session_token', true)
+                into session_token;
+
+            select auth.session_user_id(session_token)
+                into session_user_id;
+
+            if session_user_id is not null then
+                set local role to webuser;
+                perform set_config('auth.user_id', session_user_id::text, true);
+            else
+                set local role to anonymous;
+                perform set_config('auth.user_id', '', true);
+            end if;
+        end;
+    $$;
+
+comment on function auth.authenticate is
+    'Sets the role and user_id based on the session token given as a cookie.';
+
+grant execute on function auth.authenticate to anonymous;
+
+```
+
+We need to take care to use `set local ...` statements or the function
+`set_config(..., ..., true)` in order to absolutely make sure that we don't leak
+settings between requests. Those variants set variables that are valid
+only for the current transaction and PostgREST runs each request in its own
+transaction.
+
+> #### Note on developing functions
+>
+> As with permissions, it usually makes sense to develop functions step by step
+> and to iterate on them using tests. For 'print statement debugging' in
+> `plpgsql` functions, you can use statements like `raise warning 'Test: %',
+> var;`, where `var` is a variable that will be formatted into the string at
+> `%`.
+
+We will configure PostgREST to run this function before every request in
+[`postgrest.conf`](postgrest.conf) using `pre-request = "auth.authenticate"`.
+
+
+### Usage permission on the `auth` schema
+
+The `api`, `anonymous` and `webuser` roles will need to work with this schema:
+
+```sql
+grant usage on schema auth to api, anonymous, webuser;
+
+```
+
+
+### Resetting role
+
+We are done with setting up our `auth` schema, so we switch back to the
+superuser.
+
+```sql
+reset role;
+
+```
+
+
+## API schema
 
 The `api` schema defines an API on top of our application that will be exposed
 to PostgREST. We could define several different APIs or maintain an API even
@@ -741,9 +923,6 @@ comment on schema api is
 By using the `authorization` keyword, the newly created `api` schema will be
 owned by the `api` role.
 
-We will handle any PostgREST specific stuff here,
-especially the reading and setting of cookies.
-
 
 ### Switch to `api` role
 
@@ -755,69 +934,9 @@ set role api;
 
 ```
 
-We will be able to return to the superuser role later with `reset role;`.
-
 If the views in the `api` schema were owned by the superuser, they would be
 executed with the permissions of the superuser and bypass Row Level security.
 We'll check with tests if we got it right in the end.
-
-
-### Authentication hook
-
-For each request, PostgREST will provide cookie values from the original HTTP
-request it received in the `request.cookie.*` variables. In the authentication
-hook that we define below, we will read the `session_token` cookie, if it
-exists. The function will switch roles and set the appropriate `user_id` if the
-session as identified by the token is valid.
-
-```sql
-create function api.authenticate()
-    returns void
-    language plpgsql
-    as $$
-        declare
-            session_token text;
-            session_user_id int;
-        begin
-            select current_setting('request.cookie.session_token', true)
-                into session_token;
-
-            select app.session_user_id(session_token)
-                into session_user_id;
-
-            if session_user_id is not null then
-                set local role to webuser;
-                perform set_config('app.user_id', session_user_id::text, true);
-            else
-                set local role to anonymous;
-                perform set_config('app.user_id', '', true);
-            end if;
-        end;
-    $$;
-
-comment on function api.authenticate is
-    'Sets the role and user_id based on the session token given as a cookie.';
-
-grant execute on function api.authenticate to anonymous;
-
-```
-
-We need to take care to use `set local ...` statements or the function
-`set_config(..., ..., true)` in order to absolutely make sure that we don't leak
-settings between requests. Those variants set variables that are valid
-only for the current transaction and PostgREST runs each request in its own
-transaction.
-
-> Note on developing functions
->
-> As with permissions, it usually makes sense to develop functions step by step
-> and to iterate on them using tests. For 'print statement debugging' in
-> `plpgsql` functions, you can use statements like `raise warning 'Test: %',
-> var;`, where `var` is a variable that will be formatted into the string at
-> `%`.
-
-We will configure PostgREST to run this function before every request in
-[`postgrest.conf`](postgrest.conf) using `pre-request = "api.authenticate"`.
 
 
 ### Users API endpoint
@@ -842,6 +961,9 @@ We grant webusers selective permissions on that view:
 grant select, update(name) on api.users to webuser;
 
 ```
+
+Our Row Level Security policies will make sure that users will only be
+able to update their own records.
 
 Each user should be able to get more details on his own account. We will
 restrict the user's access by defining a function for that purpose:
@@ -874,7 +996,7 @@ grant execute on function api.current_user to webuser;
 
 ### Login API endpoint
 
-The `api.login` endpoint wraps the `app.login` function to add the following:
+The `api.login` endpoint wraps the `auth.login` function to add the following:
 
 * Raise an exception if the given login credentials are not valid.
 * Add a header to the response to set a cookie with the session token.
@@ -888,7 +1010,8 @@ create function api.login(email text, password text)
         declare
             session_token text;
         begin
-            select app.login(email, password) into session_token;
+            select auth.login(email, password) into session_token;
+
             if session_token is null then
                 raise insufficient_privilege
                     using detail = 'invalid credentials';
@@ -923,7 +1046,7 @@ long as the user is active.
 
 ### Refresh session API endpoint
 
-In addition to the `refresh_session` function in `app`, the
+In addition to the `refresh_session` function in `auth`, the
 `api.refresh_session` variant will also update the lifetime of the session
 cookie.
 
@@ -939,7 +1062,7 @@ create function api.refresh_session()
             select current_setting('request.cookie.session_token', false)
                 into strict session_token;
 
-            perform app.refresh_session(session_token);
+            perform auth.refresh_session(session_token);
 
             perform set_config(
                 'response.headers',
@@ -964,7 +1087,7 @@ lifetime.
 
 ### Logout API endpoint
 
-`api.logout` will expire the session using `app.logout` and unset the session
+`api.logout` will expire the session using `auth.logout` and unset the session
 cookie.
 
 ```sql
@@ -974,9 +1097,7 @@ create function api.logout()
     language plpgsql
     as $$
         begin
-            raise warning 'logout role %', current_setting('role');
-
-            perform app.logout(
+            perform auth.logout(
                 current_setting('request.cookie.session_token', true)
             );
 
@@ -1037,6 +1158,7 @@ create view api.todos as
         todo_id,
         user_id,
         description,
+        public,
         created,
         done
     from
@@ -1050,8 +1172,14 @@ comment on view api.todos is
 Webusers should be able to view, create, update and delete todo items, with the
 restrictions that we previously set in the Row Level Security policies.
 
-```
-grant select, insert, update(description, done), delete on api.todos to webuser;
+```sql
+grant
+        select,
+        insert,
+        update(description, public, done),
+        delete
+    on api.todos
+    to webuser;
 
 ```
 
@@ -1062,7 +1190,7 @@ The user roles need the `usage` permission on the `api` schema before they can
 do anything with it:
 
 ```sql
-grant usage on schema api to authenticator, anonymous, webuser;
+grant usage on schema api to anonymous, webuser;
 
 ```
 
@@ -1140,6 +1268,7 @@ create function tests.test_schemas()
     begin
         return next schemas_are(ARRAY[
             'app',
+            'auth',
             'api',
             'tests',
             'public'
@@ -1149,8 +1278,7 @@ create function tests.test_schemas()
             'app',
             ARRAY[
                 'users',
-                'todos',
-                'sessions'
+                'todos'
             ]
         );
 
@@ -1170,9 +1298,9 @@ create function tests.test_schemas()
         return next schema_privs_are('app', 'api', array['USAGE']);
         return next schema_privs_are('tests', 'api', array[]::name[]);
 
-        -- Anonymous and webuser should have no direct access to the app schema.
-        return next schema_privs_are('app', 'anonymous', array[]::name[]);
+        -- anonymous and webuser roles should have no direct access to the app schema.
         return next schema_privs_are('app', 'webuser', array[]::name[]);
+        return next schema_privs_are('app', 'anonymous', array[]::name[]);
     end;
     $$;
 
@@ -1184,7 +1312,7 @@ comment on function tests.test_schemas is
 
 ### Test authorization functions
 
-Test the authorization functions:
+Tests for the authorization functions:
 
 ```sql
 create function tests.test_auth()
@@ -1211,7 +1339,7 @@ create function tests.test_auth()
 
             -- invalid password
 
-            select app.login('alice@test.org', 'invalid')
+            select auth.login('alice@test.org', 'invalid')
                 into session_token;
 
             return next is(
@@ -1223,7 +1351,7 @@ create function tests.test_auth()
 
             -- invalid email
 
-            select app.login('invalid', 'alicesecret')
+            select auth.login('invalid', 'alicesecret')
                 into session_token;
 
             return next is(
@@ -1235,7 +1363,7 @@ create function tests.test_auth()
 
             -- valid login returns session token
 
-            select app.login('alice@test.org', 'alicesecret')
+            select auth.login('alice@test.org', 'alicesecret')
                 into session_token;
 
             return next isnt(
@@ -1275,7 +1403,7 @@ create function tests.test_auth()
 
             select sessions.expires
                 into session_expires
-                from app.active_sessions sessions
+                from auth.active_sessions sessions
                 where token = session_token;
 
 
@@ -1283,7 +1411,7 @@ create function tests.test_auth()
 
             return next ok(
                 exists(select 1
-                    from app.active_sessions
+                    from auth.active_sessions
                     where user_id = alice_user_id),
                 'There should be a session for the logged in user'
             );
@@ -1300,7 +1428,7 @@ create function tests.test_auth()
 
             select sessions.expires
                 into session_expires_refreshed
-                from app.active_sessions sessions
+                from auth.active_sessions sessions
                 where token = session_token;
 
             return next ok(
@@ -1317,7 +1445,7 @@ create function tests.test_auth()
 
             return next ok(
                 not exists(select 1
-                    from app.active_sessions
+                    from auth.active_sessions
                     where token = session_token),
                 'There should be no active session after logging out'
             );
@@ -1352,16 +1480,10 @@ comment on function tests.test_roles is
 
 ### Finalize the test setup
 
-Finally, we load the `pgtap` extension and set up a function that runs all
-tests.
+To conclude the `tests` schema, we set up a function that we can call anytime to
+run all tests.
 
 ```sql
-\echo 'Loading the pgtap extension...'
-\echo 'If the extension is missing and this fails, the tests will be rolled back,'
-\echo 'but the application will be usable.'
-
-create extension pgtap;
-
 create function tests.run()
     returns setof text
     language sql
@@ -1379,23 +1501,31 @@ commit;
 Run all tests in a transaction that will be rolled back:
 
 ```sql
+\echo 'Running tests...'
+
 begin;
 
-select tests.run();
+select tests.run() "test results";
 
 rollback;
 
+\echo '...testing done.'
+
 ```
 
-This will print out the test results to stdout and undo any changes that the
-tests did to the data. The only visible trace from running the tests will be
-the state of the primary key sequences, e.g. `app.users_user_id_seq` will have
-a higher value than before. This is because PostgreSQL reserves new ids for
-transactions in order to maintain high performance on concurrent inserts, and
-does not release then even if the transactions are rolled back. We could reset
-the sequences to their earlier value with something like `select
-setval('app.users_user_id_seq', max(user_id)) from app.users;` if we cared
-about that.
+This will print out the test results to `stdout` and undo any changes that the
+tests did to our data.
+
+> #### Side-effect of running the tests
+>
+> The only visible trace from running the tests is going to be the state of the
+> primary key sequences, e.g. `app.users_user_id_seq`, which will have a higher
+> value than before. This is because PostgreSQL reserves new ids in a sequence
+> for transactions in order to maintain high performance on concurrent inserts,
+> and does not release them even if the transactions are rolled back. We could
+> reset the sequences to their earlier value with something like `select
+> setval('app.users_user_id_seq', max(user_id)) from app.users;` if we cared
+> about that.
 
 
 ## Fixtures

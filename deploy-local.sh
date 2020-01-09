@@ -48,7 +48,7 @@ psql -P pager=off -f "$EXAMPLEAPP_BASEDIR/app.sql"
 pg_ctl stop > /dev/null
 
 echo "Running PostgreSQL and PostgREST on $EXAMPLEAPP_URI"
-echo "Press Ctrl-c to exit and clean up the temp directory $EXAMPLEAPP_BASEDIR."
+echo "Press Ctrl-c to exit and clean up the temp directory $EXAMPLEAPP_BASEDIR"
 
 # Start a non-daemonized instance of the database server.
 postgres -F -c listen_addresses="" -k "$PGHOST" &
