@@ -585,11 +585,11 @@ comment on function app.session_user_id is
 
 ```
 
-The authenticator role will need to access this function in order to authenticate
-our users:
+The anonymous role will need to access this function in order to authenticate
+itself:
 
 ```sql
-grant execute on function app.session_user_id to authenticator;
+grant execute on function app.session_user_id to anonymous;
 
 ```
 
@@ -717,7 +717,7 @@ access to the data schema, but restrict access through the row level
 security policies.
 
 ```sql
-grant usage on schema app to authenticator, api;
+grant usage on schema app to anonymous, api;
 
 ```
 
@@ -798,7 +798,7 @@ create function api.authenticate()
 comment on function api.authenticate is
     'Sets the role and user_id based on the session token given as a cookie.';
 
-grant execute on function api.authenticate to authenticator;
+grant execute on function api.authenticate to anonymous;
 
 ```
 
