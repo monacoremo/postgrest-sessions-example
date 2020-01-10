@@ -74,23 +74,14 @@ was set up.
 ## Development and testing
 
 To quickly iterate on the database schema, you can run something like `echo
-app.sql.md | entr -r ./deploy-local.sh`. The
-[`entr`](http://eradman.com/entrproject/) utility (which is also provided in
-the Nix environment) takes a list of files to watch on `stdin` and restarts
-the command if any of the given files is changed. This will load the schema
-into a fresh database on every changen, including the `pgTAP` test suite defined
+app.sql.md | entr -r ./deploy-local.sh`. This will load the schema
+into a fresh database on every change, including the test suite defined
 within it.
 
+> The [`entr`](http://eradman.com/entrproject/) utility (which is also provided in
+> the Nix environment) takes a list of files to watch on `stdin` and restarts
+> the command if any of the given files is changed. 
+
 To run the integration tests in [`tests.py`](tests.py), you'll need Python 3
-with `py.test` and `requests`. Run the tests with `py.test tests.py`. You can
-use the option `-k [PATTERN]` to run only specific tests and `-vv` to show more
-details.
-
-For convenience, the [`test.sh`](test.sh) script wraps py.test and will wait
-for the API to become available before running the tests. To run the tests on
-each change, you can run, for example: `ls | entr -r ./test.sh`.
-
-If you run the tests in the same environment as the locally deployed app
-(`source deploy-local.env` first, then run the other scripts), the tests
-that are defined in the database schema will also be run. Otherwise, they
-will be skipped.
+with `py.test` and `requests`. To run the full test-suite on each change, you 
+can run, for example: `ls | entr -r ./test-local.sh`.

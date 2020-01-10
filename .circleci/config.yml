@@ -29,6 +29,6 @@ jobs:
           name: Run tests
           command: |
             nix-shell --run \
-              'su -c "./deploy-local-test.sh --junitxml=test-results/junit.xml" testuser'
+              'su -c "./test-local.sh --junitxml=test-results/junit.xml" testuser'
       - store_test_results:
             path: test-results
