@@ -1,0 +1,34 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+      - image: nixos/nix:2.3
+    steps:
+      - run:
+          name: Install git and openssh
+          command: nix-env -i git openssh
+      - checkout
+      - restore_cache:
+          key: nix-{{ .Branch }}-{{ checksum "shell.nix" }}
+      - run:
+          name: Pre-load Nix environment
+          command: nix-shell -v --run "echo loaded nix environment"
+      - save_cache:
+          paths:
+            - /nix/
+          key: nix-{{ .Branch }}-{{ checksum "shell.nix" }}
+      - run:
+          name: Set up a non-root test user (required for postgrest)
+          command: |
+            adduser testuser --disabled-password
+            mkdir test-results
+            # There must be a better way to do this...
+            chown -R testuser:testuser /root/project
+            chmod o+xr /root /root/project
+      - run:
+          name: Run tests
+          command: |
+            nix-shell --run \
+              'su -c "./deploy-local-test.sh --junitxml=test-results/junit.xml" testuser'
+      - store_test_results:
+            path: test-results
