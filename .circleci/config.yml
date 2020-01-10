@@ -18,7 +18,7 @@ jobs:
             - /nix/
           key: nix-{{ .Branch }}-{{ checksum "shell.nix" }}
       - run:
-          name: Set up a non-root test user (required for postgrest)
+          name: Set up a non-root test user (required for postgres)
           command: |
             adduser testuser --disabled-password
             mkdir test-results
