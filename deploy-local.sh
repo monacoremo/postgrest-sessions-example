@@ -6,12 +6,12 @@
 
 set -e # abort on error
 
-# Source 'deploy-local.env' if the example environment is not yet set.
-if [[ -z "$EXAMPLEAPP_URI" ]]; then
+# Create a new environment if the example environment is not yet set.
+if [[ -z "$EXAMPLEAPP_BASEDIR" ]]; then
     echo "Loading a new environment from 'deploy-local.env'..."
-    source deploy-local.env
+    source "$(./mkenv-local.sh)"
 else
-    echo "Using the existing environment in '$EXAMPLEAPP_BASEDIR'..."
+    echo "Using the existing environment in $EXAMPLEAPP_BASEDIR..."
 fi
 
 mkdir -p "$EXAMPLEAPP_BASEDIR"

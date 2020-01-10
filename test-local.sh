@@ -2,9 +2,14 @@
 
 set -e
 
-source deploy-local.env
+source "$(./mkenv-local.sh)"
 
-trap "kill 0" exit
+cleanup() {
+    rm -rf "$EXAMPLEAPP_BASEDIR"
+    kill 0
+}
+
+trap cleanup exit
 
 ./deploy-local.sh &
 
