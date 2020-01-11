@@ -22,8 +22,7 @@ session based authentication:
 * Auth functions defined in the [`auth` schema](#login).
 * The [`authenticate` function](#authentication-hook) that should be
   set up as the `pre-request` hook in PostgREST.
-* Auth API endpoints in the [`apí` schema](#login-api-endpoint).
-
+* Auth API endpoints in the [`api` schema](#login-api-endpoint).
 
 ## Basic setup
 
@@ -43,7 +42,6 @@ of `psql` to set the respective
 [variables](https://www.postgresql.org/docs/12/app-psql.html#APP-PSQL-VARIABLES).
 We will use more `psql` Meta Commands in the course of this script.
 
-
 ### Start transaction
 
 The rest of this `psql` script will run in a transaction:
@@ -58,11 +56,10 @@ back, including definitions of new tables, newly set up roles etc. This is
 a valuable feature of PostgreSQL not available in most other relational
 databases.
 
-
 ### Create extensions
 
 In this application, we are going to use the `pgcrypto` extension to salt and
-hash passwords and to gernerate random session tokens. `citext` will provide us
+hash passwords and to generate random session tokens. `citext` will provide us
 with a case-insensitive text type which we will use for emails. `pgTAP` allows
 us to define and run tests within the database. While the first two extensions
 come with PostgreSQL by default, you will need to install the `pgTAP` one
@@ -77,14 +74,12 @@ create extension pgtap;
 
 ```
 
-
 ## Roles
 
 Roles in PostgreSQL apply to the database cluster (i.e. the set of databases
-managed by one PostreSQL server) as a whole. Setting up the roles for our
+managed by one PostgreSQL server) as a whole. Setting up the roles for our
 application is the only part that might encounter conflicts when run on a fresh
 database. We are going to set up all the required roles here.
-
 
 ### Authenticator role and its sub-roles
 
@@ -97,7 +92,7 @@ PostgREST will log in as the `authenticator` role and switch to either the
 create role authenticator noinherit login;
 
 comment on role authenticator is
-    'Role that serves as an entrypoint for API servers such as PostgREST.';
+    'Role that serves as an entry-point for API servers such as PostgREST.';
 
 create role anonymous nologin noinherit;
 
@@ -111,7 +106,7 @@ comment on role webuser is
 
 ```
 
-As we won't use the JWT authentication feature, PostgREST it will always switch
+As we won't use the JWT authentication feature, PostgREST will always switch
 to the `anonymous` role first. We will then switch roles again if the user
 is authenticated based on the session logic defined in
 [`auth.authenticate`](#authentication-hook).
@@ -132,12 +127,10 @@ Alternatively, you can use the `psql` meta command `\password authenticator`
 interactively, which will make sure that the password does not appear In any
 logs or history files.
 
-
 ### Auth and API roles
 
 The `auth` and `api` roles will own their respective schemas including the
 tables, views and functions defined in them.
-
 
 ```sql
 create role auth nologin;
@@ -154,7 +147,6 @@ comment on role api is
 
 You might choose to add more roles and even separate APIs with fine grained
 privileges when your application grows.
-
 
 ### Revoke default execute privileges on newly defined functions
 
@@ -179,7 +171,6 @@ alter default privileges for role auth, api revoke execute on functions from pub
 
 ```
 
-
 ## App schema
 
 The `app` schema will contain the current state and business logic of the
@@ -199,7 +190,6 @@ comment on schema app is
 In this example, the `app` schema will be owned by the superuser (usually
 `postgres`). In larger application, it might make sense to have it owned by a
 separate role with lower privileges.
-
 
 ### Users
 
@@ -226,13 +216,15 @@ comment on table app.users is
 
 The unique constraint on email will make sure, that an email address can only
 be used by one user at a time. PostgreSQL will create an index in order to
-enforce this contraint, which will also make our login queries faster. The
+enforce this constraint, which will also make our login queries faster. The
 `email` column is set to be case insensitive with the `citext` type, as we
 don't want to allow the same email address to be used more than one time by
 capitalizing it differently.
 
 To validate the email, it would be best to create a [custom
 domain](https://dba.stackexchange.com/a/165923):
+
+> This code snippet is not part of the application
 
     create extension plperl;
     create language plperlu;
@@ -251,12 +243,11 @@ domain](https://dba.stackexchange.com/a/165923):
         $$;
 
     create domain valid_email as citext not null
-        contraint valid_email_check check (validate_email(value))
+        constraint valid_email_check check (validate_email(value))
 
 We could then use `valid_email` as the column type. We will skip this for this
-example, as it would require another extension that might not be availale by
+example, as it would require another extension that might not be available by
 default.
-
 
 #### Hashing passwords
 
@@ -286,7 +277,7 @@ create trigger cryptpassword
 `app.cryptpassword` is a special kind of function that returns a trigger. We
 use the PostgreSQL procedural language `plpgsql` to define it. We would prefer
 to use plain SQL where possible to define functions, but using the procedural
-language is necessary in this case. Trigger functions recieve several implicit
+language is necessary in this case. Trigger functions receive several implicit
 arguments, including:
 
 * `tg_op` will be set to the operator of the triggering query, e.g. `INSERT`,
@@ -304,7 +295,6 @@ that can be used before `begin` to declare variables, as we will see later.
 
 The trigger we defined here will fire on any change of the `password` field and
 make sure that only salted and hashed passwords are saved in the database.
-
 
 #### Permissions on the `users` table
 
@@ -341,10 +331,9 @@ grant all on app.users_user_id_seq to api;
 > but it seems more practicable to keep the permission grants
 > close to the definition of each object.
 
+### To-dos
 
-### Todos
-
-In this example application we will manage todo items, as they are simple and
+In this example application we will manage to-do items, as they are simple and
 still well suited to demonstrate the security mechanisms and PostgREST
 features. Let's say that, in order to show the permissions and Row Level
 Security mechanisms, we want to make the items visible to their owner and, if
@@ -370,7 +359,7 @@ comment on column app.todos.public is
 
 ```
 
-The unique contraint will make sure, that each user can only have one todo item
+The unique constraint will make sure, that each user can only have one todo item
 with a specific title.
 
 Our API will get access to the `app.todo` table:
@@ -405,7 +394,6 @@ This seems to work without actually granting the role `usage` on this schema.
 > tests) and running them while adding permissions step by step until
 > everything works. You don't need to come up with those queries from nothing!
 
-
 ### Row Level Security and policies
 
 #### Enable Row Level Security
@@ -429,7 +417,6 @@ schema are owned by the superuser.
 PostgreSQL will make sure that our policies are consistently applied in all
 cases, e.g. when performing joins of embeds. This would be very challenging to
 implement reliably outside the database.
-
 
 #### Helper function: Current `user_id`
 
@@ -457,10 +444,9 @@ grant execute on function app.current_user_id to api, webuser;
 
 ```
 
-
 #### Policies on `app.users`
 
-Webusers should be able to see all other users (we'll restrict the columns
+Web-users should be able to see all other users (we'll restrict the columns
 through the API views), but only edit their own record.
 
 ```sql
@@ -507,7 +493,6 @@ create policy api_insert_user
 
 ```
 
-
 #### Access to `app.todos`
 
 Users should be able to read todo items that they own or that are public.
@@ -535,7 +520,6 @@ create policy webuser_write_todo
 
 ```
 
-
 ### Usage permissions on the `app` schema
 
 The views owned by the api schema will be executed with its permissions,
@@ -547,7 +531,6 @@ security policies.
 grant usage on schema app to auth, api;
 
 ```
-
 
 ## Auth schema
 
@@ -563,7 +546,6 @@ comment on schema auth is
 
 ```
 
-
 ### Switch to the `auth` role
 
 All following tables and functions should be owned by the `auth` role. The
@@ -575,7 +557,6 @@ set role auth;
 ```
 
 We will be able to return to the superuser role later with `reset role;`.
-
 
 ### Sessions
 
@@ -613,9 +594,9 @@ clock_timestamp() + '...'::interval;`.  The function `clock_timestamp()` will
 always return the current time, independent from when the current transaction
 started (other than, for example, `now()`).
 
-We use a check contraint here to have the database maintain some invariants on
+We use a check constraint here to have the database maintain some invariant on
 our data, in this case that a session should not expire before it was created.
-With good contraints, we can prevent whole classes of bugs in our application.
+With good constraints, we can prevent whole classes of bugs in our application.
 
 In most places in our application, only the sessions that are currently active
 will be of interest.  We will create a view that identifies them reliably and
@@ -669,7 +650,6 @@ comment on function auth.clean_sessions is
 To run this function regularly, we could create a separate role with limited
 privileges, granting it just `usage` on the `auth` schema and `execute` on this
 function, that the cron job will be able to login as.
-
 
 ### Login
 
@@ -727,7 +707,7 @@ There is a lot happening here, so let's go through it step by step:
   `login` in this case (without the schema).
 * The returned token is generated automatically based on the default value
   defined for the `token` column in the `app.sessions` table. If no new session
-  has been created, i.e. because the credentials weren't valid, then `null` will
+  has been created, i.e. because the credentials were not valid, then `null` will
   be returned by the function.
 
 Our API needs to be able to use this function:
@@ -736,7 +716,6 @@ Our API needs to be able to use this function:
 grant execute on function auth.login to api;
 
 ```
-
 
 ### Refresh session
 
@@ -766,7 +745,6 @@ grant execute on function auth.refresh_session to api;
 
 ```
 
-
 ### Logout
 
 We expire sessions by setting their expiration time to the current time:
@@ -788,7 +766,6 @@ comment on function auth.logout is
 grant execute on function auth.logout to api;
 
 ```
-
 
 ### Session User-ID
 
@@ -823,7 +800,6 @@ grant execute on function auth.session_user_id to anonymous;
 
 The query in this function will be efficient based on the primary key
 index on the `token` column.
-
 
 ### Authentication hook
 
@@ -882,7 +858,6 @@ transaction.
 We will configure PostgREST to run this function before every request in
 [`postgrest.conf`](postgrest.conf) using `pre-request = "auth.authenticate"`.
 
-
 ### Usage permission on the `auth` schema
 
 The `api`, `anonymous` and `webuser` roles will need to work with this schema:
@@ -892,8 +867,7 @@ grant usage on schema auth to api, anonymous, webuser;
 
 ```
 
-
-### Resetting role
+### Resetting role from `auth` to the superuser
 
 We are done with setting up our `auth` schema, so we switch back to the
 superuser.
@@ -902,7 +876,6 @@ superuser.
 reset role;
 
 ```
-
 
 ## API schema
 
@@ -923,7 +896,6 @@ comment on schema api is
 By using the `authorization` keyword, the newly created `api` schema will be
 owned by the `api` role.
 
-
 ### Switch to `api` role
 
 All following views and functions should be owned by the `api` role. The
@@ -937,7 +909,6 @@ set role api;
 If the views in the `api` schema were owned by the superuser, they would be
 executed with the permissions of the superuser and bypass Row Level security.
 We'll check with tests if we got it right in the end.
-
 
 ### Users API endpoint
 
@@ -955,7 +926,7 @@ create view api.users as
 
 ```
 
-We grant webusers selective permissions on that view:
+We grant web-users selective permissions on that view:
 
 ```sql
 grant select, update(name) on api.users to webuser;
@@ -975,7 +946,6 @@ create type api.user as (
     email citext
 );
 
-
 create function api.current_user()
     returns api.user
     language sql
@@ -992,7 +962,6 @@ comment on function api.current_user is
 grant execute on function api.current_user to webuser;
 
 ```
-
 
 ### Login API endpoint
 
@@ -1043,7 +1012,6 @@ a conservative value that is shorter than the session duration according to our
 business logic. Our frontend clients should refresh the session regularly as
 long as the user is active.
 
-
 ### Refresh session API endpoint
 
 In addition to the `refresh_session` function in `auth`, the
@@ -1084,7 +1052,6 @@ grant execute on function api.refresh_session to webuser;
 See the [login endpoint](#login-api-endpoint) regarding the cookie
 lifetime.
 
-
 ### Logout API endpoint
 
 `api.logout` will expire the session using `auth.logout` and unset the session
@@ -1116,7 +1083,6 @@ grant execute on function api.logout to webuser;
 
 ```
 
-
 ### Register API endpoint
 
 The registration endpoint will register a new user and create a new session.
@@ -1147,7 +1113,6 @@ grant execute on function api.register to anonymous;
 
 ```
 
-
 ### Todos API endpoint
 
 We will expose the todo items through a view:
@@ -1169,7 +1134,7 @@ comment on view api.todos is
 
 ```
 
-Webusers should be able to view, create, update and delete todo items, with the
+Web-users should be able to view, create, update and delete todo items, with the
 restrictions that we previously set in the Row Level Security policies.
 
 ```sql
@@ -1183,7 +1148,6 @@ grant
 
 ```
 
-
 ### Grant users access to the `api` schema
 
 The user roles need the `usage` permission on the `api` schema before they can
@@ -1194,8 +1158,7 @@ grant usage on schema api to anonymous, webuser;
 
 ```
 
-
-### Resetting role
+### Resetting role from `api` to the superuser
 
 Now that the API is fully described in the `api` schema, we switch back to the
 superuser role.
@@ -1205,8 +1168,7 @@ reset role;
 
 ```
 
-
-## Finalize àpplication setup
+## Finalize application setup
 
 We are done with defining the application and commit all changes:
 
@@ -1214,7 +1176,6 @@ We are done with defining the application and commit all changes:
 commit;
 
 ```
-
 
 ## Tests
 
@@ -1231,11 +1192,10 @@ create schema tests;
 
 ```
 
-
 ### Helper function for impersonating users in tests
 
-We will need to repeatedly impersonate users for our tests, lets define a helper
-function to help us with that:
+We will need to repeatedly impersonate users for our tests, so let's define a
+helper function to help us with that:
 
 ```sql
 create function tests.impersonate(role name, user_id integer)
@@ -1252,7 +1212,6 @@ comment on function tests.impersonate is
     'Impersonate the given role and user.';
 
 ```
-
 
 ### Test our schema setup
 
@@ -1309,7 +1268,6 @@ comment on function tests.test_schemas is
 
 ```
 
-
 ### Test authorization functions
 
 Tests for the authorization functions:
@@ -1348,7 +1306,6 @@ create function tests.test_auth()
                 'No session should be created with an invalid password'
             );
 
-
             -- invalid email
 
             select auth.login('invalid', 'alicesecret')
@@ -1359,7 +1316,6 @@ create function tests.test_auth()
                 null,
                 'No session should be created with an invalid user'
             );
-
 
             -- valid login returns session token
 
@@ -1372,7 +1328,6 @@ create function tests.test_auth()
                 'Session token should be created for valid credentials'
             );
 
-
             -- invalid login via the api
 
             prepare invalid_api_login as
@@ -1383,7 +1338,6 @@ create function tests.test_auth()
                 'insufficient_privilege',
                 'The api.login endpoint should throw on invalid logins'
             );
-
 
             -- login via the api
 
@@ -1398,14 +1352,12 @@ create function tests.test_auth()
 
             reset role;
 
-
             -- remember the current expiry time for later tests
 
             select sessions.expires
                 into session_expires
                 from auth.active_sessions sessions
                 where token = session_token;
-
 
             -- check for valid session
 
@@ -1436,7 +1388,6 @@ create function tests.test_auth()
                 'Sessions should expire later when refreshed.'
             );
 
-
             -- logging out
 
             set role webuser;
@@ -1454,7 +1405,6 @@ create function tests.test_auth()
     $tests$;
 
 ```
-
 
 ### Test role memberships
 
@@ -1477,7 +1427,6 @@ comment on function tests.test_roles is
 
 ```
 
-
 ### Finalize the test setup
 
 To conclude the `tests` schema, we set up a function that we can call anytime to
@@ -1494,7 +1443,6 @@ create function tests.run()
 commit;
 
 ```
-
 
 ### Run all tests
 
@@ -1527,10 +1475,10 @@ tests did to our data.
 > setval('app.users_user_id_seq', max(user_id)) from app.users;` if we cared
 > about that.
 
-
 ## Fixtures
 
-Any fixtures can be added here.
+Any fixtures could be added here with `insert` statements. If you use `copy`
+statements or the `\copy` psql meta command, you'll need to reset the sequences.
 
 Afterwards, we should `analyze` the current database in order to help the query
 planner to be efficient.
