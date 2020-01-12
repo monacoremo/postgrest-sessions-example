@@ -710,10 +710,11 @@ There is a lot happening here, so let's go through it step by step:
   has been created, i.e. because the credentials were not valid, then `null` will
   be returned by the function.
 
-Our API needs to be able to use this function:
+Anonymous users will need to be able to use this function. Our API role will
+also need to use it, in order to log a user in directly after registration.
 
 ```sql
-grant execute on function auth.login to api;
+grant execute on function auth.login to anonymous, api;
 
 ```
 
@@ -740,8 +741,10 @@ comment on function auth.refresh_session is
 We cannot use the `auth.active_sessions` view here, as the column default on
 expires from the table `auth.sessions` is not available in the view.
 
+Only authenticated user need to use this function:
+
 ```sql
-grant execute on function auth.refresh_session to api;
+grant execute on function auth.refresh_session to webuser;
 
 ```
 
@@ -763,7 +766,7 @@ create function auth.logout(token text)
 comment on function auth.logout is
     'Expire the given session.';
 
-grant execute on function auth.logout to api;
+grant execute on function auth.logout to webuser;
 
 ```
 
@@ -973,7 +976,6 @@ The `api.login` endpoint wraps the `auth.login` function to add the following:
 ```sql
 create function api.login(email text, password text)
     returns void
-    security definer
     language plpgsql
     as $$
         declare
@@ -1021,7 +1023,6 @@ cookie.
 ```sql
 create function api.refresh_session()
     returns void
-    security definer
     language plpgsql
     as $$
         declare
@@ -1060,7 +1061,6 @@ cookie.
 ```sql
 create function api.logout()
     returns void
-    security definer
     language plpgsql
     as $$
         begin
