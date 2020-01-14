@@ -3,9 +3,8 @@ let
     let
       pinnedPkgs =
         builtins.fetchTarball {
-          name = "nixos-unstable-2020-01-02";
-          url = "https://github.com/nixos/nixpkgs/archive/7e8454fb856573967a70f61116e15f879f2e3f6a.tar.gz";
-          sha256 = "0lnbjjvj0ivpi9pxar0fyk8ggybxv70c5s0hpsqf5d71lzdpxpj8";
+          url = "https://github.com/nixos/nixpkgs/archive/f9c81b5c148572c2a78a8c1d2c8d5d40e642b31a.tar.gz";
+          sha256 = "0ff7zhqk7mjgsvqyp4pa9xjvv9cvp3mh0ss9j9mclgzfh9wbwzmf";
         };
     in
       import pinnedPkgs {};

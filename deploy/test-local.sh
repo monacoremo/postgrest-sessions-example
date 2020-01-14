@@ -2,7 +2,7 @@
 
 set -e
 
-source "$(./mkenv-local.sh)"
+source "$(deploy/mkenv-local.sh)"
 
 cleanup() {
     rm -rf "$EXAMPLEAPP_BASEDIR"
@@ -11,7 +11,7 @@ cleanup() {
 
 trap cleanup exit
 
-./deploy-local.sh &
+deploy/deploy-local.sh &
 
 echo "Waiting for API to become available... (Ctrl-c to cancel)"
 
@@ -21,4 +21,4 @@ done
 
 echo "API is ready, running tests..."
 
-exec py.test tests.py $@
+exec py.test tests/tests.py $@

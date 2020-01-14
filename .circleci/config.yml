@@ -2,33 +2,40 @@ version: 2.1
 jobs:
   build:
     docker:
-      - image: nixos/nix:2.3
+      - image: monacoremo/nix:2020-01-14-f9c81b5c-circleci
     steps:
-      - run:
-          name: Install git and openssh
-          command: nix-env -i git openssh
       - checkout
-      - restore_cache:
-          key: nix-{{ .Branch }}-{{ checksum "shell.nix" }}
       - run:
-          name: Pre-load Nix environment
-          command: nix-shell -v --run "echo loaded nix environment"
-      - save_cache:
-          paths:
-            - /nix/
-          key: nix-{{ .Branch }}-{{ checksum "shell.nix" }}
+          name: Pre-load Nix environment for the basic application
+          command: nix-shell --run "echo Loaded basic Nix environment"
       - run:
-          name: Set up a non-root test user (required for postgres)
+          name: Pre-load Nix environment for the full stack application
           command: |
-            adduser testuser --disabled-password
-            mkdir test-results
+            cd fullstack
+            nix-shell --run "echo Loaded full stack Nix environment"
+      - run:
+          name: Set up the test result directory structure
+          command: mkdir -p test-results/{basic,basic-repeat,fullstack,fullstack-repeat}
+      - run:
+          name: Grant access to the non-root test user
+          command: |
             # There must be a better way to do this...
-            chown -R testuser:testuser /root/project
+            chown -R user:user /root/project
             chmod o+xr /root /root/project
       - run:
-          name: Run tests
+          name: Run tests for the basic application
           command: |
             nix-shell --run \
-              'su -c "./test-local.sh --junitxml=test-results/junit.xml" testuser'
+              'su-exec user:user ./deploy/test-local.sh --junitxml=test-results/basic/junit.xml'
+      - run:
+          name: Re-run basic tests to make sure that they are idempotent
+          command: |
+            nix-shell --run \
+              'su-exec user:user ./deploy/test-local.sh --junitxml=test-results/basic-repeat/junit.xml'
+      - run:
+          name: Run tests for the full stack application
+          command: |
+            cd fullstack
+            nix-shell --run "su-exec user:user fullstack-tests-run --junitxml=test-results/fullstack/junit.xml" 
       - store_test_results:
             path: test-results

@@ -9,7 +9,7 @@ set -e # abort on error
 # Create a new environment if the example environment is not yet set.
 if [[ -z "$EXAMPLEAPP_BASEDIR" ]]; then
     echo "Loading a new environment from 'deploy-local.env'..."
-    source "$(./mkenv-local.sh)"
+    source "$(deploy/mkenv-local.sh)"
 else
     echo "Using the existing environment in $EXAMPLEAPP_BASEDIR..."
 fi
@@ -25,7 +25,7 @@ cleanup () {
 trap cleanup exit
 
 # Filter the SQL code blocks from the Markdown file
-sed -f md2sql.sed <app.sql.md >"$EXAMPLEAPP_BASEDIR/app.sql"
+sed -f deploy/md2sql.sed <app.sql.md >"$EXAMPLEAPP_BASEDIR/app.sql"
 
 # Initialize our database cluster in the PGDATA directory. As we'd like our
 # environment to be as reproducible as possible, we make it independent from
@@ -53,6 +53,6 @@ echo "Press Ctrl-c to exit and clean up the temp directory $EXAMPLEAPP_BASEDIR"
 # Start a non-daemonized instance of the database server.
 postgres -F -c listen_addresses="" -k "$PGHOST" &
 
-postgrest postgrest.conf &
+postgrest deploy/postgrest.conf &
 
 wait

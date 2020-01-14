@@ -13,7 +13,7 @@ sessions. At the same time, its also a full SQL script that defines the
 application when you filter for the SQL code blocks.
 
 You can get the filtered SQL script by running
-`sed -f md2sql.sed <app.sql.md >app.sql`
+`sed -f deploy/md2sql.sed <app.sql.md >app.sql`
 
 
 ## How to implement session-based authentication with PostgREST
@@ -56,16 +56,16 @@ in [`shell.nix`](shell.nix).
 
 ## Running the application
 
-Run [`./deploy-local.sh`](deploy-local.sh) and access the PostgREST API at
-[`http://localhost:3000/`](http://localhost:3000/). The script will run
+Run [`deploy/deploy-local.sh`](deploy/deploy-local.sh) and access the PostgREST
+API at [`http://localhost:3000/`](http://localhost:3000/). The script will run
 PostgreSQL in a temporary directory and connect it to PostgREST via a Unix
 domain socket. The application is automatically loaded from the `app.sql.md`
 file.
 
 You'll need to have the `postgrest` binary on your path. If you downloaded it
 into this directory, you should be able to run `PATH=".:$PATH"
-./deploy-local.sh`. The Nix shell environment from above will also take care of
-this.
+deploy/deploy-local.sh`. The Nix shell environment from above will also take
+care of this.
 
 Press `Ctrl-c` to exit and clean up the directory where the temporary database
 was set up.
@@ -74,14 +74,14 @@ was set up.
 ## Development and testing
 
 To quickly iterate on the database schema, you can run something like `echo
-app.sql.md | entr -r ./deploy-local.sh`. This will load the schema
+app.sql.md | entr -r deploy/deploy-local.sh`. This will load the schema
 into a fresh database on every change, including the test suite defined
 within it.
 
 > The [`entr`](http://eradman.com/entrproject/) utility (which is also provided in
 > the Nix environment) takes a list of files to watch on `stdin` and restarts
-> the command if any of the given files is changed. 
+> the command if any of the given files is changed.
 
-To run the integration tests in [`tests.py`](tests.py), you'll need Python 3
-with `py.test` and `requests`. To run the full test-suite on each change, you 
-can run, for example: `ls | entr -r ./test-local.sh`.
+To run the integration tests in [`tests/tests.py`](tests/tests.py), you'll need
+Python 3 with `py.test` and `requests`. To run the full test-suite on each
+change, you can run, for example: `ls | entr -r tests/test-local.sh`.
