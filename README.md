@@ -82,6 +82,6 @@ within it.
 > the Nix environment) takes a list of files to watch on `stdin` and restarts
 > the command if any of the given files is changed.
 
-To run the integration tests in [`tests/tests.py`](tests/tests.py), you'll need
+To run the integration tests in [`tests.py`](tests.py), you'll need
 Python 3 with `py.test` and `requests`. To run the full test-suite on each
-change, you can run, for example: `ls | entr -r tests/test-local.sh`.
+change, you can run, for example: `ls | entr -r deploy/test-local.sh`.

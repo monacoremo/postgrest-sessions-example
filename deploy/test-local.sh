@@ -21,4 +21,4 @@ done
 
 echo "API is ready, running tests..."
 
-exec py.test tests/tests.py $@
+exec py.test tests.py $@
