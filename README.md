@@ -9,7 +9,7 @@ This is an example of how session based authentication can be implemented with
 The key file in this example is [app.sql.md](app.sql.md), which is a literate
 SQL file (like [literal Haskell](https://wiki.haskell.org/Literate_programming)
 files). As a Markdown file, it explains how to set up an application with
-sessions. At the same time, its also a full SQL script that defines the
+sessions. At the same time, it's also a full SQL script that defines the
 application when you filter for the SQL code blocks.
 
 You can get the filtered SQL script by running
