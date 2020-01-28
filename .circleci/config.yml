@@ -9,11 +9,6 @@ jobs:
           name: Pre-load Nix environment for the basic application
           command: nix-shell --run "echo Loaded basic Nix environment"
       - run:
-          name: Pre-load Nix environment for the full stack application
-          command: |
-            cd fullstack
-            nix-shell --run "echo Loaded full stack Nix environment"
-      - run:
           name: Set up the test result directory structure
           command: mkdir -p test-results/{basic,basic-repeat,fullstack,fullstack-repeat}
       - run:
@@ -32,10 +27,5 @@ jobs:
           command: |
             nix-shell --run \
               'su-exec user:user ./deploy/test-local.sh --junitxml=test-results/basic-repeat/junit.xml'
-      - run:
-          name: Run tests for the full stack application
-          command: |
-            cd fullstack
-            nix-shell --run "su-exec user:user fullstack-tests-run --junitxml=test-results/fullstack/junit.xml" 
       - store_test_results:
             path: test-results
