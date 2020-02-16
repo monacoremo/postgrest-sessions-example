@@ -3,8 +3,8 @@ let
     let
       pinnedPkgs =
         builtins.fetchTarball {
-          url = "https://github.com/nixos/nixpkgs/archive/f9c81b5c148572c2a78a8c1d2c8d5d40e642b31a.tar.gz";
-          sha256 = "0ff7zhqk7mjgsvqyp4pa9xjvv9cvp3mh0ss9j9mclgzfh9wbwzmf";
+          url = "https://github.com/nixos/nixpkgs/archive/62bbc2abc1f3ae24943a204a4095c20737189656.tar.gz";
+          sha256 = "0cggas9zl19pzc0ikj9zdxvygqrgmj26snnmhhj27d25kh6cksww";
         };
     in
       import pinnedPkgs {};

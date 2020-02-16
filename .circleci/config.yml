@@ -2,7 +2,7 @@ version: 2.1
 jobs:
   build:
     docker:
-      - image: monacoremo/nix:2020-01-14-f9c81b5c-circleci
+      - image: monacoremo/nix:2020-01-31-62bbc2ab-circleci
     steps:
       - checkout
       - run:
